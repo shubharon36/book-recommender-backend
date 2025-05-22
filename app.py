@@ -4,15 +4,16 @@ import pandas as pd
 from sklearn.metrics.pairwise import cosine_similarity
 from fuzzywuzzy import process, fuzz
 import numpy as np
+import pickle
+import os
 
 app = Flask(__name__)
 CORS(app)
 
-# Load data and preprocessing (DO THIS ONCE!)
+# Load data and preprocessing (DO THIS ONCE LOCALLY TO SAVE .pkl FILES)
 try:
     books_dtypes = {'ISBN': 'str', 'Book-Title': 'str', 'Book-Author': 'str', 'Year-Of-Publication': 'str', 'Publisher': 'str', 'Image-URL-S': 'str', 'Image-URL-M': 'str', 'Image-URL-L': 'str'}
     books = pd.read_csv('data/Books.csv', dtype=books_dtypes)
-    # Attempt to convert Year-Of-Publication to numeric, errors='coerce' will turn invalid parsing into NaN
     books['Year-Of-Publication'] = pd.to_numeric(books['Year-Of-Publication'], errors='coerce', downcast='integer')
 
     ratings_dtypes = {'User-ID': 'int32', 'ISBN': 'str', 'Book-Rating': 'int8'}
@@ -20,9 +21,9 @@ try:
 
     users_dtypes = {'User-ID': 'int32', 'Location': 'str', 'Age': 'float32'}
     user = pd.read_csv('data/Users.csv', dtype=users_dtypes)
-    user['Age'] = pd.to_numeric(user['Age'], downcast='integer') # Try downcasting age after loading
+    user['Age'] = pd.to_numeric(user['Age'], downcast='integer')
 
-    # --- Popularity-Based Top 50 ---
+    # --- Popularity-Based Top 50 (remains the same) ---
     ratings_with_name = ratings.merge(books, on='ISBN')
     num_rating_df = ratings_with_name.groupby('Book-Title').count()['Book-Rating'].reset_index()
     num_rating_df.rename(columns={'Book-Rating': 'num_ratings'}, inplace=True)
@@ -41,6 +42,17 @@ try:
     pt.fillna(0, inplace=True)
     similarity = cosine_similarity(pt)
 
+    # --- Save the trained model components ---
+    PICKLE_DIR = 'data'
+    if not os.path.exists(PICKLE_DIR):
+        os.makedirs(PICKLE_DIR)
+    with open(os.path.join(PICKLE_DIR, 'pivot_table.pkl'), 'wb') as file:
+        pickle.dump(pt, file)
+    with open(os.path.join(PICKLE_DIR, 'similarity_matrix.pkl'), 'wb') as file:
+        pickle.dump(similarity, file)
+
+    print("Pivot table and similarity matrix saved as .pkl files in the data directory.")
+
 except FileNotFoundError as e:
     print(f"Error: Could not load data files. Ensure they are in the correct location. {e}")
     exit()
@@ -50,43 +62,60 @@ def get_top_50_books():
     top_50_books_df = top_50_books_df.drop_duplicates(subset=['Book-Title']).head(50)
     return top_50_books_df.to_dict(orient='records')
 
-def get_recommendations_from_matrix(book_name, pt, books):
+def get_recommendations_from_matrix(book_name, pt, books, similarity_matrix):
     match = process.extractOne(book_name, pt.index, scorer=fuzz.token_sort_ratio)
 
     if match[1] > 75:
-        book_index = pt.index.get_loc(match[0])
-        similarity_scores = cosine_similarity(pt)
-        similar_books = sorted(list(enumerate(similarity_scores[book_index])), key=lambda x: x[1], reverse=True)[1:6]
+        try:
+            book_index = pt.index.get_loc(match[0])
+            similarity_scores = similarity_matrix[book_index]
+            similar_books = sorted(list(enumerate(similarity_scores)), key=lambda x: x[1], reverse=True)[1:6]
 
-        recommended_books = []
-        for i, score in similar_books:
-            recommended_book_index = i
-            recommended_title = pt.index[recommended_book_index]
-            book_details = books[books['Book-Title'] == recommended_title]
-            if not book_details.empty:
-                book_details = book_details.iloc[0]
-                recommended_books.append({
-                    'Title': book_details['Book-Title'],
-                    'Author': book_details['Book-Author'],
-                    'Image-URL-L': book_details['Image-URL-L']
-                })
-            else:
-                print(f"Book title '{recommended_title}' not found in books data.")
-        return recommended_books
+            recommended_books = []
+            for i, score in similar_books:
+                recommended_title = pt.index[i]
+                book_details = books[books['Book-Title'] == recommended_title]
+                if not book_details.empty:
+                    book_details = book_details.iloc[0]
+                    recommended_books.append({
+                        'Title': book_details['Book-Title'],
+                        'Author': book_details['Book-Author'],
+                        'Image-URL-L': book_details['Image-URL-L']
+                    })
+                else:
+                    print(f"Book title '{recommended_title}' not found in books data.")
+            return recommended_books
+        except KeyError:
+            print(f"Book '{book_name}' not found in the pivot table.")
+            return []
     else:
-        print("No close match found in the pivot table. Try again.")
+        print("No close match found. Try again.")
         return []
 
 # --- API Endpoints ---
+# We will need to load the .pkl files here for the API to use
+loaded_pt = None
+loaded_similarity = None
+try:
+    with open('data/pivot_table.pkl', 'rb') as file:
+        loaded_pt = pickle.load(file)
+    with open('data/similarity_matrix.pkl', 'rb') as file:
+        loaded_similarity = pickle.load(file)
+    print("Pre-trained model loaded successfully.")
+except FileNotFoundError:
+    print("Pre-trained model files not found. Make sure to run this script locally first to generate them.")
+
 @app.route('/api/top-50', methods=['GET'])
 def top_50():
     return jsonify(get_top_50_books())
 
 @app.route('/api/recommend', methods=['POST'])
 def recommend():
+    if loaded_pt is None or loaded_similarity is None:
+        return jsonify({"error": "Pre-trained model not loaded."}), 500
     data = request.get_json()
     book_title = data['title']
-    recommendations = get_recommendations_from_matrix(book_title, pt, books)
+    recommendations = get_recommendations_from_matrix(book_title, loaded_pt, books, loaded_similarity)
     return jsonify(recommendations)
 
 if __name__ == '__main__':
