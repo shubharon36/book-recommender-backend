@@ -10,29 +10,17 @@ CORS(app)
 
 # Load data and preprocessing (DO THIS ONCE!)
 try:
-    books = pd.read_csv('data/Books.csv')
-    ratings = pd.read_csv('data/Ratings.csv')
-    user = pd.read_csv('data/Users.csv')
+    books_dtypes = {'ISBN': 'str', 'Book-Title': 'str', 'Book-Author': 'str', 'Year-Of-Publication': 'str', 'Publisher': 'str', 'Image-URL-S': 'str', 'Image-URL-M': 'str', 'Image-URL-L': 'str'}
+    books = pd.read_csv('data/Books.csv', dtype=books_dtypes)
+    # Attempt to convert Year-Of-Publication to numeric, errors='coerce' will turn invalid parsing into NaN
+    books['Year-Of-Publication'] = pd.to_numeric(books['Year-Of-Publication'], errors='coerce', downcast='integer')
 
-    # --- Optimize data types ---
-    ratings['User-ID'] = pd.to_numeric(ratings['User-ID'], downcast='integer')
-    ratings['Book-Rating'] = pd.to_numeric(ratings['Book-Rating'], downcast='integer')
+    ratings_dtypes = {'User-ID': 'int32', 'ISBN': 'str', 'Book-Rating': 'int8'}
+    ratings = pd.read_csv('data/Ratings.csv', dtype=ratings_dtypes)
 
-    # For the 'books' DataFrame, let's look at potential columns:
-    # ISBN is usually a string, no need to downcast.
-    # 'Year-Of-Publication' might be downcast to integer if it doesn't have missing values that were filled with floats.
-    try:
-        books['Year-Of-Publication'] = pd.to_numeric(books['Year-Of-Publication'], downcast='integer')
-    except:
-        print("Could not downcast 'Year-Of-Publication' in books.")
-
-    # For the 'user' DataFrame:
-    try:
-        user['User-ID'] = pd.to_numeric(user['User-ID'], downcast='integer')
-        # 'Age' could potentially be downcast
-        user['Age'] = pd.to_numeric(user['Age'], downcast='integer')
-    except:
-        print("Could not downcast 'User-ID' or 'Age' in users.")
+    users_dtypes = {'User-ID': 'int32', 'Location': 'str', 'Age': 'float32'}
+    user = pd.read_csv('data/Users.csv', dtype=users_dtypes)
+    user['Age'] = pd.to_numeric(user['Age'], downcast='integer') # Try downcasting age after loading
 
     # --- Popularity-Based Top 50 ---
     ratings_with_name = ratings.merge(books, on='ISBN')
