@@ -8,6 +8,7 @@ click==8.2.0
 colorama==0.4.6
 fastapi==0.115.12
 Flask==3.1.1
+gunicorn
 flask-cors==6.0.0
 fuzzywuzzy==0.18.0
 google-api-core==2.24.2
