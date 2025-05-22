@@ -1,1 +1,1 @@
-web: sh -c '.venv/bin/gunicorn app:app'
+web: python3 -m gunicorn app:app
